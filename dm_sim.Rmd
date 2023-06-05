@@ -274,7 +274,7 @@ save(u, file = "gene_usage.RData", compress = T)
 
 
 ```{r, echo=FALSE, eval=TRUE}
-u <- get(load(file = "gene_usage.RData"))
+u <- get(load(file = "dm_sim/gene_usage.RData"))
 ```
 
 
@@ -556,7 +556,7 @@ fit_dm <- rstan::sampling(object = model_dm,
 
 
 ```{r, echo = FALSE}
-save(fit_dm, file = "fit_dm.RData", compress = T)
+save(fit_dm, file = "dm_sim/fit_dm.RData", compress = T)
 ```
 
 
@@ -573,13 +573,13 @@ fit_m <- rstan::sampling(object = model_m,
 
 
 ```{r, echo = FALSE}
-save(fit_m, file = "fit_m.RData")
+save(fit_m, file = "dm_sim/fit_m.RData")
 ```
 
 
 ```{r, echo=FALSE, eval = TRUE, echo=F}
-fit_dm <- get(load(file = "fit_dm.RData"))
-fit_m <- get(load(file = "fit_m.RData"))
+fit_dm <- get(load(file = "dm_sim/fit_dm.RData"))
+fit_m <- get(load(file = "dm_sim/fit_m.RData"))
 ```
 
 
