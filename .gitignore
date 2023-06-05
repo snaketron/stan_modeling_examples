@@ -50,3 +50,7 @@ rsconnect/
 
 #
 .rData
+
+# fit
+*fit_m.RData
+*fit_dm.RData
