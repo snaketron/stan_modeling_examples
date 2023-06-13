@@ -77,6 +77,8 @@ generated quantities {
   real log_lik_test [N_sample_test, 2];
   
   vector [N_gene] mu [2];
+  real a [N_gene];
+  real b [N_gene];
 
   for(i in 1:N_sample) {
     mu[1] = dirichlet_rng(xi * softmax(alpha[i]-beta[i]));
@@ -89,8 +91,10 @@ generated quantities {
   }
   
   // PPC: condition-specific
-  mu[1] = xi * softmax((alpha_mu_gene+alpha_sigma_gene)-(beta_mu_gene+beta_sigma_gene));
-  mu[2] = xi * softmax((alpha_mu_gene+alpha_sigma_gene)+(beta_mu_gene+beta_sigma_gene));
+  a = normal_rng(alpha_mu_gene, alpha_sigma_gene);
+  b = normal_rng(beta_mu_gene, beta_sigma_gene);
+  mu[1] = xi * softmax(to_vector(a)-to_vector(b));
+  mu[2] = xi * softmax(to_vector(a)+to_vector(b));
   // PPC: test
   for(i in 1:N_sample_test) {
     log_lik_test[i,1] = dirichlet_multinomial_complete_lpmf(Y_1_test[,i]|mu[1]);

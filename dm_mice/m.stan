@@ -66,6 +66,8 @@ generated quantities {
   real log_lik_train [N_sample, 2];
   
   vector [N_gene] mu [2];
+  real a [N_gene];
+  real b [N_gene];
   
   // PPC
   for(i in 1:N_sample) {
@@ -79,8 +81,10 @@ generated quantities {
   }
   
   // PPC - test (condition-specific)
-  mu[1]=softmax((alpha_mu_gene+alpha_sigma_gene)-(beta_mu_gene+beta_sigma_gene));
-  mu[2]=softmax((alpha_mu_gene+alpha_sigma_gene)+(beta_mu_gene+beta_sigma_gene));
+  a = normal_rng(alpha_mu_gene, alpha_sigma_gene);
+  b = normal_rng(beta_mu_gene, beta_sigma_gene);
+  mu[1]=softmax(to_vector(a)-to_vector(b));
+  mu[2]=softmax(to_vector(a)+to_vector(b));
   for(i in 1:N_sample_test) {
     log_lik_test[i,1] = multinomial_lpmf(Y_1_test[,i]|mu[1]);
     log_lik_test[i,2] = multinomial_lpmf(Y_2_test[,i]|mu[2]);
