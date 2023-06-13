@@ -1,17 +1,17 @@
 require(rstan)
 
 
-fs <- list.files(path = "dm_mice/", 
+fs <- list.files(path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
                  pattern = "_ds", 
                  full.names = TRUE)
-fs_short <- list.files(path = "dm_mice/", 
+fs_short <- list.files(path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
                        pattern = "_ds", 
                        full.names = FALSE)
 
 
 
-model_m <- rstan::stan_model(file = "dm_mice/m.stan")
-model_dm <- rstan::stan_model(file = "dm_mice/dm.stan")
+model_m <- rstan::stan_model(file = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/m.stan")
+model_dm <- rstan::stan_model(file = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/dm.stan")
 
 
 get_loo <- function(file_path, 
@@ -71,24 +71,24 @@ get_loo <- function(file_path,
 
 get_loo(file_path = fs[1], 
         file_key = fs_short[1], 
-        out_path = "dm_mice/", 
+        out_path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
         model_m = model_m, 
         model_dm = model_dm)
 
 get_loo(file_path = fs[1], 
         file_key = fs_short[1], 
-        out_path = "dm_mice/", 
+        out_path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
         model_m = model_m, 
         model_dm = model_dm)
 
 get_loo(file_path = fs[1], 
         file_key = fs_short[1], 
-        out_path = "dm_mice/", 
+        out_path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
         model_m = model_m, 
         model_dm = model_dm)
 
 get_loo(file_path = fs[1], 
         file_key = fs_short[1], 
-        out_path = "dm_mice/", 
+        out_path = "/mnt/nfs/simo/stan_modeling_examples/dm_mice/", 
         model_m = model_m, 
         model_dm = model_dm)
