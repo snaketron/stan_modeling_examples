@@ -1,9 +1,11 @@
 ---
-title: "Working with Dirichlet Multinomial data"
+title: "Working with count compositional data"
 author: "SK"
 date: "`r Sys.Date()`"
 output:
-  tufte::tufte_html: default
+  tufte::tufte_html: 
+    toc: true
+    toc_depth: 2
   code_folding: hide
   
 ---
@@ -300,7 +302,7 @@ ggplot()+
   scale_color_manual(values = c("steelblue", "orange"))
 ```
 
-# Modeling
+## Modeling
 We know that the data was generated from $DM$ distribution. What would happen 
 if we assumed that the data comes from a) multinomial distribution (model $M$) 
 and b) dirichlet multinomial distribution (model $DM$)?
@@ -317,19 +319,19 @@ from each other, and use partial pooling to enable sharing of information
 
 Model $DM$ and $M$ are identical, except for the following differences:
 
-## Model $DM$
+### Model $DM$
 
   * $\vec{y_i} \sim \mathrm{Multinomial}(\vec{\theta_i}, n_i)$
   * $\vec{\theta_i} \sim \mathrm{Dirichlet}(\xi \cdot \mathrm{softmax}(\vec{\mu_i}))$
   * $\vec{\mu_i} = \vec{\gamma}_i+\vec{\beta}_{i}x$
 
-## Model $M$
+### Model $M$
   
   * $\vec{y_i} \sim \mathrm{Multinomial}(\vec{\theta_i}, n_i)$
   * $\vec{\theta_i} = \mathrm{softmax}(\vec{\mu_i})$
   * $\vec{\mu_i} = \vec{\gamma}_i+\vec{\beta}_{i}x$
 
-## STAN code for model $DM$
+### STAN code for model $DM$
 
 ```{stan, output.var = "model_dm"}
 functions {
@@ -445,7 +447,7 @@ generated quantities {
 ```
 
 
-## STAN code for model $M$
+### STAN code for model $M$
 
 ```{stan, output.var = "model_m"}
 data {
@@ -548,7 +550,7 @@ generated quantities {
 }
 ```
 
-## Model fitting
+### Model fitting
 We will fit models $DM$ and $M$ using $D_{\text{train}}$.
 
 ```{r}
@@ -558,7 +560,8 @@ fit_dm <- rstan::sampling(object = model_dm,
                           cores = 5,
                           iter = 3500,
                           warmup = 1500,
-                          control = list(adapt_delta = 0.99, max_treedepth = 14),
+                          control = list(adapt_delta = 0.99, 
+                                         max_treedepth = 14),
                           algorithm = "NUTS")
 ```
 
@@ -591,7 +594,7 @@ fit_m <- get(load(file = "dm_sim/fit_m.RData"))
 ```
 
 
-# Posterior predictive checks for each sample
+## Posterior predictive checks for each sample
 We will use the parameters at the lowest level of the models, which are sample
 specific parameters, to generate new data. These predictions (means and 95\% 
 HDIs) will be compared against the observed data. 
@@ -662,7 +665,7 @@ table(ppc$in_hdi, ppc$model_name)
 ```
 
 
-# PPC from condition-specific parameters
+## PPC from condition-specific parameters
 To check how well our models predicts new data ($D_{\text{test}}$), we cannot 
 use the sample-specific parameters. For this, we have to use the condition-
 specific parameters found at the 2nd layer of model structure (see STAN code; 
@@ -749,7 +752,7 @@ rm(ppc_group_dm, ppc_group_m)
 ```
 
 
-## How many $D_{\text{train}}$ observations are outside the 95\% HDIs of the predictions?
+### How many $D_{\text{train}}$ observations are outside the 95\% HDIs of the predictions?
 Model $DM$ does more meaningful predictions with respect to both 
 $D_{\text{test}}$ and $D_{\text{train}}$.
 
@@ -760,7 +763,7 @@ ppc_group$in_hdi_in <- ifelse(ppc_group$Y_Din >= ppc_group$X2.5. &
 table(ppc_group$in_hdi_in, ppc_group$model_name)
 ```
 
-## How many $D_{\text{test}}$ observations are outside the 95\% HDIs of the predictions?
+### How many $D_{\text{test}}$ observations are outside the 95\% HDIs of the predictions?
 
 ```{r, eval=TRUE, echo = FALSE}
 ppc_group$in_hdi_out <- ifelse(ppc_group$Y_Dout >= ppc_group$X2.5. & 
@@ -772,8 +775,8 @@ table(ppc_group$in_hdi_out, ppc_group$model_name)
 
 
 
-# Model comparison with LOO
-## with R-package loo (or rstan)
+## Model comparison with LOO
+### with R-package loo (or rstan)
 Now, lets turn to LOO with R-package loo. We get many high $k$ diagnostic 
 values. We have too few samples per condition and this is why the approximation 
 fails. Increasing the number of samples to 30 produced mostly "good" and few 
@@ -781,12 +784,12 @@ fails. Increasing the number of samples to 30 produced mostly "good" and few
 
 Nevertheless, due to the bad approximation we cannot rely on these results.
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, eval=T}
 rstan::loo(fit_dm)
 ```
 
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, eval=T}
 rstan::loo(fit_m)
 ```
 
@@ -800,14 +803,14 @@ $\text{WAIC} = -2(\text{lppd}-p_{\text{eff}})$, and we compute $\text{WAIC}$ for
 $D_{\text{train}}$ and $D_{\text{test}}$ for each model.
 
 
-## Model $DM$ WAIC
+### Model $DM$ WAIC
 
 ```{r, eval=TRUE, echo = FALSE}
 loglik_train_dm <- summary(fit_dm, par = "log_lik_train")$summary
 loglik_test_dm <- summary(fit_dm, par = "log_lik_test")$summary
 ```
 
-## $D_{\text{train}}$
+#### $D_{\text{train}}$
 Notice that the loo package generated similar estimates:
 
 ```{r, eval=TRUE, echo = FALSE}
@@ -818,7 +821,7 @@ cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_train_dm[,"mean"])*sqrt(length(l
 # see https://avehtari.github.io/modelselection/CV-FAQ.html#15_Why_(sqrt{n})_in_Standard_error_(SE)_of_LOO
 ```
 
-## $D_{\text{test}}$
+#### $D_{\text{test}}$
 As expected, we see slightly worse (larger) \text{WAIC} for model $DM$ for 
 $D_{\text{test}}$ compared to $D_{\text{train}}$:
 
@@ -830,7 +833,7 @@ cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_test_dm[,"mean"])*sqrt(length(lo
 ```
 
 
-## Model $M$ WAIC
+### Model $M$ WAIC
 For model $M$, we got $\text{lppd}(D_{\text{train}})$ and 
 $p_{\text{eff}}(D_{\text{train}})$ similar to those generated by the R-package 
 loo. Notice that $\text{lppd}(D_{\text{train}})$ of model $M$ is much smaller 
@@ -842,7 +845,8 @@ loglik_train_m <- summary(fit_m, par = "log_lik_train")$summary
 loglik_test_m <- summary(fit_m, par = "log_lik_test")$summary
 ```
 
-## $D_{\text{train}}$
+#### $D_{\text{train}}$
+
 ```{r, eval=TRUE, echo = FALSE}
 cat("lppd:", sum(loglik_train_m[,"mean"]), "\n")
 cat("p_eff:", sum(loglik_train_m[,"sd"]^2), "\n")
@@ -850,7 +854,7 @@ cat("WAIC:", -2*(sum(loglik_train_m[,"mean"])-sum(loglik_train_m[,"sd"]^2)), "\n
 cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_train_m[,"mean"])*sqrt(length(loglik_train_m[,"mean"])))
 ```
 
-## $D_{\text{test}}$
+#### $D_{\text{test}}$
 However, now have a look at the incredible high (bad) values for 
 $\text{lppd}(D_{\text{test}})$ of model $M$ given $D_{\text{test}}$. We see 
 especially high $p_{\text{eff}}$, which makes sense given the highly variable 
@@ -1094,7 +1098,7 @@ ggplot()+
   scale_color_manual(values = c("steelblue", "orange"))
 ```
 
-# Modeling
+## Modeling
 Same models, $DM$ and $M$, as before.
 
 ```{r}
@@ -1138,7 +1142,7 @@ fit_m <- get(load(file = "dm_sim/fit_m_data_m.RData"))
 ```
 
 
-# Posterior predictive checks for each sample
+## Posterior predictive checks for each sample
 
 ```{r, eval = TRUE, echo = FALSE}
 
@@ -1202,7 +1206,7 @@ table(ppc$in_hdi, ppc$model_name)
 ```
 
 
-# PPC from condition-specific parameters
+## PPC from condition-specific parameters
 
 ```{r, eval=TRUE, echo = FALSE}
 
@@ -1280,7 +1284,7 @@ rm(ppc_group_dm, ppc_group_m)
 ```
 
 
-## How many $D_{\text{train}}$ observations are outside the 95\% HDIs of the predictions?
+### How many $D_{\text{train}}$ observations are outside the 95\% HDIs of the predictions?
 
 ```{r, eval=TRUE, echo = FALSE}
 ppc_group$in_hdi_in <- ifelse(ppc_group$Y_Din >= ppc_group$X2.5. & 
@@ -1289,7 +1293,7 @@ ppc_group$in_hdi_in <- ifelse(ppc_group$Y_Din >= ppc_group$X2.5. &
 table(ppc_group$in_hdi_in, ppc_group$model_name)
 ```
 
-## How many $D_{\text{test}}$ observations are outside the 95\% HDIs of the predictions?
+### How many $D_{\text{test}}$ observations are outside the 95\% HDIs of the predictions?
 
 ```{r, eval=TRUE, echo = FALSE}
 ppc_group$in_hdi_out <- ifelse(ppc_group$Y_Dout >= ppc_group$X2.5. & 
@@ -1300,19 +1304,16 @@ table(ppc_group$in_hdi_out, ppc_group$model_name)
 
 
 
-
-# Model comparison with LOO
-
 ## Model comparison with the Widely Applicable Information Criterion (WAIC)
 
-## Model $DM$ WAIC
+### Model $DM$ WAIC
 
 ```{r, eval=TRUE, echo = FALSE}
 loglik_train_dm <- summary(fit_dm, par = "log_lik_train")$summary
 loglik_test_dm <- summary(fit_dm, par = "log_lik_test")$summary
 ```
 
-## $D_{\text{train}}$
+#### $D_{\text{train}}$
 Notice that the loo package generated similar estimates:
 
 ```{r, eval=TRUE, echo = FALSE}
@@ -1323,7 +1324,7 @@ cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_train_dm[,"mean"])*sqrt(length(l
 # see https://avehtari.github.io/modelselection/CV-FAQ.html#15_Why_(sqrt{n})_in_Standard_error_(SE)_of_LOO
 ```
 
-## $D_{\text{test}}$
+#### $D_{\text{test}}$
 
 ```{r, eval=TRUE, echo = FALSE}
 cat("lppd:", sum(loglik_test_dm[,"mean"]), "\n")
@@ -1333,14 +1334,15 @@ cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_test_dm[,"mean"])*sqrt(length(lo
 ```
 
 
-## Model $M$ WAIC
+### Model $M$ WAIC
 
 ```{r, eval=TRUE, echo = FALSE}
 loglik_train_m <- summary(fit_m, par = "log_lik_train")$summary
 loglik_test_m <- summary(fit_m, par = "log_lik_test")$summary
 ```
 
-## $D_{\text{train}}$
+#### $D_{\text{train}}$
+
 ```{r, eval=TRUE, echo = FALSE}
 cat("lppd:", sum(loglik_train_m[,"mean"]), "\n")
 cat("p_eff:", sum(loglik_train_m[,"sd"]^2), "\n")
@@ -1348,7 +1350,7 @@ cat("WAIC:", -2*(sum(loglik_train_m[,"mean"])-sum(loglik_train_m[,"sd"]^2)), "\n
 cat("SE of lppd = lppd * sqrt(N) =:", sd(loglik_train_m[,"mean"])*sqrt(length(loglik_train_m[,"mean"])))
 ```
 
-## $D_{\text{test}}$
+#### $D_{\text{test}}$
 
 ```{r, eval=TRUE, echo = FALSE}
 cat("lppd:", sum(loglik_test_m[,"mean"]), "\n")
