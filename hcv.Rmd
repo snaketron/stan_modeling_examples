@@ -1,0 +1,509 @@
+---
+title: "HCV"
+author: "SK"
+date: "`r Sys.Date()`"
+output:
+  tufte::tufte_html: 
+    toc: true
+    toc_depth: 2
+  code_folding: hide
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=TRUE)
+```
+
+```{r, eval=TRUE, echo=F, message=F, warning=F, comment=F}
+require(rstan)
+rstan_options(auto_write = TRUE)
+require(ggplot2)
+require(patchwork)
+require(IgGeneUsage)
+```
+
+
+
+```{r, echo = FALSE}
+
+get_usage <- function(u) {
+  
+  get_proc_ud <- function(Y, 
+                          gene_names, 
+                          sample_ids, 
+                          X) {
+    # process usage
+    pud <- vector(mode = "list", length = ncol(Y))
+    for(i in base::seq_len(length.out = ncol(Y))) {
+      pud[[i]] <- data.frame(gene_usage_count = Y[,i],
+                             gene_name = gene_names,
+                             total_usage_count = sum(Y[,i]),
+                             gene_usage_prop = Y[,i]/sum(Y[,i]),
+                             sample_id = sample_ids[i],
+                             condition = X[i],
+                             stringsAsFactors = FALSE)
+    }
+    pud <- do.call(rbind, pud)
+    rownames(pud) <- NULL
+    return(pud)
+  }
+  
+  
+  
+  # if the same sample_id is present in both conditions
+  key <- paste(u$sample_id, u$condition, sep = '_')
+  if(length(unique(key)) != length(unique(u$sample_id))) {
+    warning("Same sample_id in both conditions, sample_id's extra coded")
+    u$sample_id <- key
+    rm(key)
+  }
+  
+  # get Y data, fill empty combinations with 0
+  Y <- reshape2::acast(data = u, 
+                       formula = gene_name~sample_id,
+                       drop = FALSE, 
+                       value.var = "gene_usage_count",
+                       fill = 0, 
+                       fun.aggregate = sum)
+  
+  sample_ids <- colnames(Y)
+  gene_names <- rownames(Y)
+  
+  # get N data
+  N_d <- stats::aggregate(gene_usage_count~sample_id, 
+                          data = u,
+                          FUN = sum, 
+                          drop = FALSE)
+  N <- N_d$gene_usage_count
+  names(N) <- N_d$sample_id
+  rm(N_d)
+  N <- N[sample_ids]
+  
+  # get X data
+  u <-  u[u$sample_id %in% sample_ids, ]
+  u <- u[duplicated(u[, c("sample_id")]) == FALSE, ]
+  
+  X_d <- stats::aggregate(condition~sample_id, 
+                          data = u, 
+                          FUN = unique)
+  X <- X_d$condition
+  names(X) <- X_d$sample_id
+  rm(X_d)
+  X <- X[sample_ids]
+  
+  # get X mapping
+  X_u <- sort(x = unique(X), decreasing = TRUE)
+  x1 <- which(X == X_u[1])
+  x2 <- which(X == X_u[2])
+  X_m <- numeric(length = length(X))
+  X_m[x1] <- 1
+  X_m[x2] <- -1
+  
+  # compute processed usage data
+  pu <- get_proc_ud(Y = Y, 
+                    gene_names = gene_names, 
+                    sample_ids = sample_ids, 
+                    X = X)
+  
+  return (list(Y = Y, 
+               N = N, 
+               N_sample = ncol(Y), 
+               N_gene = nrow(Y),
+               X = X_m, 
+               Xorg = X, 
+               gene_names = gene_names,
+               sample_names = sample_ids, 
+               proc_ud = pu))
+}
+
+```
+
+```{r}
+data("IGHV_HCV")
+```
+
+
+
+```{r, echo = FALSE}
+u <- get_usage(u = IGHV_HCV)
+```
+
+
+```{r, fig.width=12, fig.height=5, fig.align='center', eval=TRUE}
+ggplot()+
+  geom_point(data = u$proc_ud, aes(x = gene_name, y = gene_usage_count, col = condition),
+             position = position_dodge(width = 0.5), size = 1)+
+  theme_bw(base_size = 10)+
+  theme(legend.position = "top")+
+  scale_color_manual(values = c("steelblue", "orange"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
+```{stan, output.var = "model_dm", class.source = 'fold-hide'}
+functions {
+  real dirichlet_multinomial_complete_lpmf(int[] y, vector alpha) {
+    real sum_alpha = sum(alpha);
+    return lgamma(sum_alpha) - lgamma(sum(y) + sum_alpha)
+           + lgamma(sum(y)+1) - sum(lgamma(to_vector(y)+1))
+           + sum(lgamma(to_vector(y) + alpha)) - sum(lgamma(alpha));
+  }
+}
+
+data {
+  int <lower = 0> N_sample; // number of samples (repertoires)
+  int <lower = 0> N_gene; // number of genes
+  int Y [N_gene, N_sample]; // number of successes (cells) in samples x gene
+  int N [N_sample]; // number of total tries (repertoire size)
+  int X [N_sample]; // design variable X=1 (condition 1) vs. X=-1 (condition 2)
+  // test data
+  int <lower = 0> N_sample_test; // number of samples (repertoires)
+  int Y_test [N_gene, N_sample_test]; // number of successes (cells) in samples x gene
+  int N_test [N_sample_test]; // number of total tries (repertoire size)
+  int X_test [N_sample_test]; // design variable X=1 (condition 1) vs. X=-1 (condition 2)
+}
+
+parameters {
+  vector [N_gene] alpha_mu_gene;
+  real <lower=0> beta_sigma_gene;
+  real <lower=0> alpha_sigma_gene;
+  real <lower=0> beta_sigma_pop;
+  vector [N_gene] beta_z [N_sample];
+  vector [N_gene] alpha_z [N_sample];
+  vector [N_gene] beta_z_gene;
+  real <lower=0> xi;
+}
+
+transformed parameters {
+  vector [N_gene] alpha [N_sample];
+  vector [N_gene] beta [N_sample];
+  vector [N_gene] beta_mu_gene;
+  
+  beta_mu_gene = 0+beta_sigma_pop*beta_z_gene;
+  for(i in 1:N_sample) {
+    beta[i] = beta_mu_gene + beta_sigma_gene * beta_z[i];
+    alpha[i] = alpha_mu_gene + alpha_sigma_gene * alpha_z[i];
+  }
+}
+
+model {
+  target += exponential_lpdf(xi | 0.05);
+  target += cauchy_lpdf(beta_sigma_pop | 0, 1);
+  target += cauchy_lpdf(alpha_sigma_gene | 0, 1);
+  target += cauchy_lpdf(beta_sigma_gene | 0, 1);
+  for(i in 1:N_sample) {
+    target += normal_lpdf(alpha_z[i] | 0, 1);
+    target += normal_lpdf(beta_z[i] | 0, 1);
+  }
+  target += normal_lpdf(beta_z_gene | 0, 1);
+  target += normal_lpdf(alpha_mu_gene | 0, 5);
+  
+  // likelihood
+  for(i in 1:N_sample) {
+    target += dirichlet_multinomial_complete_lpmf(Y[,i]|xi * softmax(alpha[i]+beta[i]*X[i]));
+  }
+}
+
+generated quantities {
+  int Y_hat [N_gene, N_sample];
+  int Y_hat_group [N_gene, N_sample];
+  real log_lik [N_sample];
+  real log_lik_train [N_sample];
+  real log_lik_test [N_sample_test];
+  
+  vector [N_gene] mu;
+  vector [N_gene] mu_group [2];
+  real a [N_gene];
+  real b [N_gene];
+
+  for(i in 1:N_sample) {
+    mu = dirichlet_rng(xi * softmax(alpha[i]+beta[i]*X[i]));
+    Y_hat[,i] = multinomial_rng(mu, N[i]);
+    
+    log_lik[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|xi*softmax(alpha[i]+beta[i]*X[i]));
+  }
+  
+  // PPC: condition-specific
+  a = normal_rng(alpha_mu_gene, alpha_sigma_gene);
+  b = normal_rng(beta_mu_gene, beta_sigma_gene);
+  mu_group[1] = xi * softmax(to_vector(a)+to_vector(b)*+1);
+  mu_group[2] = xi * softmax(to_vector(a)+to_vector(b)*-1);
+  
+  // PPC: train
+  for(i in 1:N_sample) {
+    if(X[i]==1) {
+      log_lik_train[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|mu_group[1]);
+    } 
+    else {
+      log_lik_train[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|mu_group[2]);
+    }
+  }
+  
+  // PPC: test
+  for(i in 1:N_sample_test) {
+    if(X_test[i]==1) {
+      log_lik_test[i] = dirichlet_multinomial_complete_lpmf(Y_test[,i]|mu_group[1]);
+      Y_hat_group[,i] = multinomial_rng(dirichlet_rng(mu_group[1]), N[i]);
+    }
+    else {
+      log_lik_test[i] = dirichlet_multinomial_complete_lpmf(Y_test[,i]|mu_group[2]);
+      Y_hat_group[,i] = multinomial_rng(dirichlet_rng(mu_group[2]), N[i]);
+    }
+  }
+}
+```
+
+
+
+```{stan, output.var = "model_dm_u", class.source = 'fold-hide'}
+functions {
+  real dirichlet_multinomial_complete_lpmf(int[] y, vector alpha) {
+    real sum_alpha = sum(alpha);
+    return lgamma(sum_alpha) - lgamma(sum(y) + sum_alpha)
+           + lgamma(sum(y)+1) - sum(lgamma(to_vector(y)+1))
+           + sum(lgamma(to_vector(y) + alpha)) - sum(lgamma(alpha));
+  }
+}
+
+data {
+  int <lower = 0> N_sample; // number of samples (repertoires)
+  int <lower = 0> N_gene; // number of genes
+  int Y [N_gene, N_sample]; // number of successes (cells) in samples x gene
+  int N [N_sample]; // number of total tries (repertoire size)
+  int X [N_sample]; // design variable X=1 (condition 1) vs. X=-1 (condition 2)
+}
+
+parameters {
+  vector [N_gene] alpha_mu_gene;
+  real <lower=0> beta_sigma_gene;
+  real <lower=0> alpha_sigma_gene;
+  real <lower=0> beta_sigma_pop;
+  vector [N_gene] beta_z [N_sample];
+  vector [N_gene] alpha_z [N_sample];
+  vector [N_gene] beta_z_gene;
+  real <lower=0> xi;
+}
+
+transformed parameters {
+  vector [N_gene] alpha [N_sample];
+  vector [N_gene] beta [N_sample];
+  vector [N_gene] beta_mu_gene;
+  
+  beta_mu_gene = 0+beta_sigma_pop*beta_z_gene;
+  for(i in 1:N_sample) {
+    beta[i] = beta_mu_gene + beta_sigma_gene * beta_z[i];
+    alpha[i] = alpha_mu_gene + alpha_sigma_gene * alpha_z[i];
+  }
+}
+
+model {
+  target += exponential_lpdf(xi | 0.05);
+  target += cauchy_lpdf(beta_sigma_pop | 0, 1);
+  target += cauchy_lpdf(alpha_sigma_gene | 0, 1);
+  target += cauchy_lpdf(beta_sigma_gene | 0, 1);
+  for(i in 1:N_sample) {
+    target += normal_lpdf(alpha_z[i] | 0, 1);
+    target += normal_lpdf(beta_z[i] | 0, 1);
+  }
+  target += normal_lpdf(beta_z_gene | 0, 1);
+  target += normal_lpdf(alpha_mu_gene | 0, 5);
+  
+  // likelihood
+  for(i in 1:N_sample) {
+    target += dirichlet_multinomial_complete_lpmf(Y[,i]|xi * softmax(alpha[i]+beta[i]*X[i]));
+  }
+}
+
+generated quantities {
+  int Y_hat [N_gene, N_sample];
+  int Y_hat_group [N_gene, N_sample];
+  real log_lik [N_sample];
+  real log_lik_train [N_sample];
+  
+  vector [N_gene] mu;
+  vector [N_gene] mu_group [2];
+  real a [N_gene];
+  real b [N_gene];
+
+  for(i in 1:N_sample) {
+    mu = dirichlet_rng(xi * softmax(alpha[i]+beta[i]*X[i]));
+    Y_hat[,i] = multinomial_rng(mu, N[i]);
+    
+    log_lik[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|xi*softmax(alpha[i]+beta[i]*X[i]));
+  }
+  
+  // PPC: condition-specific
+  a = normal_rng(alpha_mu_gene, alpha_sigma_gene);
+  b = normal_rng(beta_mu_gene, beta_sigma_gene);
+  mu_group[1] = xi * softmax(to_vector(a)+to_vector(b)*+1);
+  mu_group[2] = xi * softmax(to_vector(a)+to_vector(b)*-1);
+  
+  // PPC: train
+  for(i in 1:N_sample) {
+    if(X[i]==1) {
+      log_lik_train[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|mu_group[1]);
+      Y_hat_group[,i] = multinomial_rng(dirichlet_rng(mu_group[1]), N[i]);
+    } 
+    else {
+      log_lik_train[i] = dirichlet_multinomial_complete_lpmf(Y[,i]|mu_group[2]);
+      Y_hat_group[,i] = multinomial_rng(dirichlet_rng(mu_group[2]), N[i]);
+    }
+  }
+}
+```
+
+
+
+### Model fitting
+We will fit models $DM$ and $M$ using $D_{\text{train}}$.
+
+```{r}
+fit_dm <- rstan::sampling(object = model_dm_u,
+                          data = u,
+                          chains = 6,
+                          cores = 6,
+                          iter = 5000,
+                          warmup = 1500,
+                          control = list(adapt_delta = 0.95, 
+                                         max_treedepth = 12),
+                          algorithm = "NUTS")
+save(fit_dm, file = "dm_hcv/fit_dm.RData")
+```
+
+
+
+
+```{r}
+fit_zibb_flex <- IgGeneUsage::DGU(ud = u$proc_ud[, c("sample_id", "condition", "gene_name", "gene_usage_count")],
+                                  mcmc_warmup = 1500,
+                                  mcmc_steps = 10000,
+                                  mcmc_chains = 6,
+                                  mcmc_cores = 6,
+                                  hdi_lvl = 0.95,
+                                  adapt_delta = 0.95,
+                                  max_treedepth = 12)
+save(fit_zibb_flex, file = "dm_hcv/fit_zibb_flex.RData")
+```
+
+
+
+
+```{r}
+fit_zibb <- IgGeneUsage::DGU(ud = u$proc_ud[, c("sample_id", "condition", "gene_name", "gene_usage_count")],
+                             mcmc_warmup = 1500,
+                             mcmc_steps = 5000,
+                             mcmc_chains = 6,
+                             mcmc_cores = 6,
+                             hdi_lvl = 0.95,
+                             adapt_delta = 0.95,
+                             max_treedepth = 12)
+save(fit_zibb, file = "dm_hcv/fit_zibb.RData")
+```
+
+
+```{r}
+fit_dm <- get(load(file = "dm_hcv/fit_dm.RData"))
+fit_zibb <- get(load(file = "dm_hcv/fit_zibb.RData"))
+```
+
+
+
+
+```{r, eval = TRUE, echo = FALSE}
+
+get_ppc <- function(fit, gene_usage, model_name) {
+  s <- data.frame(summary(fit, par = "Y_hat")$summary)
+  s$Y <- as.vector(t(gene_usage$Y))
+  x <- do.call(rbind, strsplit(x = gsub(pattern = "Y_hat|\\[|\\]", 
+                                        replacement = '', 
+                                        x = rownames(s)),
+                               split = ','))
+  s$gene_name <- x[, 1]
+  s$sample_id <- x[, 2]
+  
+  s <- merge(x = s, 
+             y = gene_usage$proc_ud[, c("condition", "sample_id")], 
+             by = "sample_id",
+             all.x = T)
+  
+  s$model_name <- model_name
+  return(s)
+}
+
+```
+
+```{r, eval = TRUE, echo = FALSE}
+
+ppc <- get_ppc(fit = fit_dm, gene_usage = u, model_name = "DM")
+
+```
+
+```{r, fig.width=8, fig.height=8, fig.align='center', eval=TRUE}
+ggplot(data = ppc)+
+  geom_abline(slope = 1, intercept = 0)+
+  facet_wrap(facets = ~sample_id, nrow = 5)+
+  geom_point(aes(y = mean, x = Y, col = condition), size = 1)+
+  geom_errorbar(aes(y = mean, x = Y, ymin = X2.5., 
+                    ymax = X97.5., col = condition))+
+  theme_bw(base_size = 10)+
+  theme(legend.position = "top")+
+  xlab(label = "Observed Y")+
+  ylab(label = "Predicted mean Y and 95% HDI")+
+  scale_color_manual(values = c("steelblue", "orange"))
+```
+
+```{r, eval=TRUE, echo = FALSE}
+
+get_ppc_group <- function(fit, gene_usage, model_name) {
+  s <- data.frame(summary(fit, par = "Y_hat_group")$summary)
+  s$Y_Din <- as.vector(t(gene_usage$Y))
+  
+  x <- do.call(rbind, strsplit(x = gsub(pattern = "Y_hat_group|\\[|\\]", 
+                                        replacement = '', 
+                                        x = rownames(s)),
+                               split = ','))
+  s$gene_name <- x[, 1]
+  s$sample_id <- x[, 2]
+  
+  s <- merge(x = s, 
+             y = rbind(gene_usage$proc_ud[, c("condition", "sample_id")],
+                       gene_usage$proc_ud_test[, c("condition", "sample_id")]),
+             by = "sample_id",
+             all.x = T)
+  
+  
+  s$model_name <- model_name
+  return(s)
+}
+
+```
+
+```{r, eval=TRUE, echo = FALSE}
+ppc_group <- get_ppc_group(fit = fit_dm, gene_usage = u, model_name = "DM")
+```
+
+```{r, fig.width=12, fig.height=4, fig.align='center', eval=TRUE, echo = FALSE}
+(ggplot(data = ppc_group)+
+  facet_wrap(facets = ~model_name, ncol = 1)+
+  geom_point(aes(x = gene_name, y = mean, col = condition), 
+                position = position_dodge(width = 0.55),  size = 0.5)+
+  geom_point(aes(x = gene_name, y = Y_Din, group = condition),
+                position = position_dodge(width = 0.55), size = 1.1)+
+  geom_errorbar(aes(x = gene_name, y = mean, ymin = X2.5., ymax = X97.5., col = condition), 
+                width = 0.35, position = position_dodge(width = 0.55))+
+  theme_bw(base_size = 10)+
+  theme(legend.position = "top")+
+  xlab(label = "Gene")+
+  ylab(label = "Predicted Y [95% HDI]")+
+  scale_color_manual(values = c("steelblue", "orange"))+
+   ggtitle(label = "D_train"))
+```
+
+
+```{r}
+s <- data.frame(summary(fit_dm, par = "beta_mu_gene")$summary)
+s$dgu <- ifelse(test = s$X2.5.<=0 & s$X97.5.>=0, yes = 0, no = 1)
+s$gene <- u$gene_names
+
+```
+
